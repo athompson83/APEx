@@ -20,14 +20,14 @@ import type {
   BubbleQuiz,
   BubbleAssessmentQuestion,
   BubbleTestResult,
-} from '../../types/index';
+} from '../../types/assessment';
 
 // ─── Assessment Definitions ───────────────────────────────────────────────────
 
 /**
  * Fetches an assessment definition by ID.
- * Assessments are higher-level containers that reference a quiz and define
- * passing thresholds and attempt limits.
+ * Assessments are polymorphic wrappers around either an EvalForm (Is Form)
+ * or a Quiz (Is Quiz).
  */
 export async function getAssessment(id: string): Promise<BubbleAssessment> {
   const raw = await get<unknown>(dataUrlById(BUBBLE_TYPES.ASSESSMENT, id));
@@ -35,17 +35,26 @@ export async function getAssessment(id: string): Promise<BubbleAssessment> {
 }
 
 /**
- * Fetches all active assessments for a given program phase.
+ * Fetches all active assessments.
+ * Optionally filter to quiz-type or form-type assessments.
  */
-export async function getAssessmentsByPhase(
-  phaseId: string,
+export async function getActiveAssessments(
+  type?: 'quiz' | 'form',
 ): Promise<BubbleAssessment[]> {
+  const constraints: BubbleConstraint[] = [
+    { key: 'Active', constraint_type: 'equals', value: true },
+  ];
+
+  if (type === 'quiz') {
+    constraints.push({ key: 'Is Quiz', constraint_type: 'equals', value: true });
+  } else if (type === 'form') {
+    constraints.push({ key: 'Is Form', constraint_type: 'equals', value: true });
+  }
+
   const params = {
-    constraints: buildConstraintsFromArray([
-      { key: 'Program Phase', constraint_type: 'equals', value: phaseId },
-      { key: 'Is Active', constraint_type: 'equals', value: true },
-    ]),
-    limit: 50,
+    constraints: buildConstraintsFromArray(constraints),
+    ...buildSortParams('Assessment Name', true),
+    limit: 100,
   };
 
   const raw = await get<unknown>(dataUrl(BUBBLE_TYPES.ASSESSMENT), { params });
@@ -56,7 +65,7 @@ export async function getAssessmentsByPhase(
 
 /**
  * Fetches a quiz definition by ID.
- * Quizzes hold the list of question references and display settings.
+ * Quizzes hold the list of question references and scoring configuration.
  */
 export async function getQuiz(id: string): Promise<BubbleQuiz> {
   const raw = await get<unknown>(dataUrlById(BUBBLE_TYPES.QUIZ, id));
@@ -66,42 +75,18 @@ export async function getQuiz(id: string): Promise<BubbleQuiz> {
 // ─── Questions ────────────────────────────────────────────────────────────────
 
 /**
- * Fetches all questions for a given quiz, sorted by Order ascending.
+ * Fetches all questions for a given quiz, sorted by Rank ascending.
  *
- * Questions are multiple-choice. The correct answer is stored on the
- * server and NOT returned to the client until after submission to prevent
- * cheating — this function only retrieves the question text and options.
+ * The 'Correct Answer Index' field is present on the Bubble record but
+ * should only be shown to the user after they submit their answers.
+ * Callers are responsible for not displaying this field during an active quiz.
  */
 export async function getQuizQuestions(
   quizId: string,
 ): Promise<BubbleAssessmentQuestion[]> {
   const params = {
     constraints: buildConstraints({ Quiz: quizId }),
-    ...buildSortParams('Order', true),
-    limit: 100,
-  };
-
-  const raw = await get<unknown>(dataUrl(BUBBLE_TYPES.QUESTION_MC), { params });
-  const questions = normalizeBubbleList<BubbleAssessmentQuestion>(raw).results;
-
-  // Strip the correct answer from client-side data so it can't be inspected
-  // The answer will be included in server response after submission
-  return questions.map((q) => ({
-    ...q,
-    'Correct Answer': undefined as unknown as 'A' | 'B' | 'C' | 'D',
-  }));
-}
-
-/**
- * Fetches quiz questions including correct answers. Only call this
- * after a test has been submitted (for showing results/explanations).
- */
-export async function getQuizQuestionsWithAnswers(
-  quizId: string,
-): Promise<BubbleAssessmentQuestion[]> {
-  const params = {
-    constraints: buildConstraints({ Quiz: quizId }),
-    ...buildSortParams('Order', true),
+    ...buildSortParams('Rank', true),
     limit: 100,
   };
 
@@ -112,13 +97,13 @@ export async function getQuizQuestionsWithAnswers(
 // ─── Test Results ─────────────────────────────────────────────────────────────
 
 /**
- * Submits a completed test result to Bubble.
+ * Submits a completed quiz attempt to Bubble.
  *
- * The answers map is keyed by question ID, with the selected answer letter
- * as the value (e.g. { 'questionId123': 'B', 'questionId456': 'A' }).
+ * The Answer Map is keyed by question _id, with the selected 0-based answer
+ * index as the value. Example: { 'questionId1': 2, 'questionId2': 0 }
  *
- * Bubble's backend workflow calculates the score, compares against the
- * assessment's passing threshold, and sets the Passed field.
+ * Bubble's backend workflow calculates Score Earned, Score Percent, and Passed
+ * fields after receiving the submission.
  */
 export async function submitTestResult(
   data: Partial<BubbleTestResult>,
@@ -126,16 +111,17 @@ export async function submitTestResult(
   if (!data['Quiz']) {
     throw new Error('Quiz ID is required to submit a test result');
   }
-  if (!data['User']) {
-    throw new Error('User ID is required to submit a test result');
+  if (!data['Subject']) {
+    throw new Error('Subject ID is required to submit a test result');
   }
-  if (!data['Answers']) {
-    throw new Error('Answers are required to submit a test result');
+  if (!data['Answer Map']) {
+    throw new Error('Answer Map is required to submit a test result');
   }
 
   const payload: Partial<BubbleTestResult> = {
     ...data,
-    'Submitted Date': data['Submitted Date'] ?? new Date().toISOString(),
+    'Submitted At': data['Submitted At'] ?? new Date().toISOString(),
+    'Started At': data['Started At'] ?? new Date().toISOString(),
   };
 
   const raw = await post<unknown>(dataUrl(BUBBLE_TYPES.TEST_RESULT), payload);
@@ -151,7 +137,7 @@ export async function submitTestResult(
 }
 
 /**
- * Fetches test results for a given user.
+ * Fetches test results for a given subject (trainee).
  * Optionally filters to results for a specific quiz.
  *
  * Results are sorted newest first so the most recent attempt appears first.
@@ -161,7 +147,7 @@ export async function getTestResults(
   quizId?: string,
 ): Promise<BubbleTestResult[]> {
   const constraints: BubbleConstraint[] = [
-    { key: 'User', constraint_type: 'equals', value: userId },
+    { key: 'Subject', constraint_type: 'equals', value: userId },
   ];
 
   if (quizId) {
@@ -174,7 +160,7 @@ export async function getTestResults(
 
   const params = {
     constraints: buildConstraintsFromArray(constraints),
-    ...buildSortParams('Submitted Date', false),
+    ...buildSortParams('Submitted At', false),
     limit: 50,
   };
 
@@ -183,8 +169,8 @@ export async function getTestResults(
 }
 
 /**
- * Fetches the most recent test result for a user on a specific quiz.
- * Returns null if the user has not yet attempted the quiz.
+ * Fetches the most recent test result for a subject on a specific quiz.
+ * Returns null if the subject has not yet attempted the quiz.
  */
 export async function getLatestTestResult(
   userId: string,
@@ -195,7 +181,7 @@ export async function getLatestTestResult(
 }
 
 /**
- * Counts how many attempts a user has made on a specific quiz.
+ * Returns the number of attempts a subject has made on a specific quiz.
  * Used to enforce attempt limits before allowing another submission.
  */
 export async function getAttemptCount(
@@ -203,7 +189,7 @@ export async function getAttemptCount(
   quizId: string,
 ): Promise<number> {
   const constraints: BubbleConstraint[] = [
-    { key: 'User', constraint_type: 'equals', value: userId },
+    { key: 'Subject', constraint_type: 'equals', value: userId },
     { key: 'Quiz', constraint_type: 'equals', value: quizId },
   ];
 
@@ -215,4 +201,19 @@ export async function getAttemptCount(
   const raw = await get<unknown>(dataUrl(BUBBLE_TYPES.TEST_RESULT), { params });
   const list = normalizeBubbleList<BubbleTestResult>(raw);
   return list.count;
+}
+
+/**
+ * Returns true if the subject can make another attempt at the quiz,
+ * based on the quiz's Max Attempts setting and their current attempt count.
+ */
+export async function canAttemptQuiz(
+  userId: string,
+  quiz: BubbleQuiz,
+): Promise<boolean> {
+  // 0 means unlimited attempts
+  if (quiz['Max Attempts'] === 0) return true;
+
+  const attemptCount = await getAttemptCount(userId, quiz._id);
+  return attemptCount < quiz['Max Attempts'];
 }

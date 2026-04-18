@@ -20,23 +20,23 @@ import type {
   BubbleProgramPhase,
   BubblePhaseRequirement,
   BubbleProgram,
-} from '../../types/index';
+} from '../../types/roster';
 
 // ─── Roster Queries ───────────────────────────────────────────────────────────
 
 /**
- * Fetches the active program roster entry for a given user (as subject).
- * Returns null if the user has no active roster (not currently enrolled
- * in a training program).
+ * Fetches the active program roster entry for a given user (as subject/intern).
+ * Returns null if the user is not currently enrolled in an active program.
  *
- * Filters to 'active' status only — historical rosters are excluded.
+ * Filters to Active = true to exclude completed or terminated enrollments.
+ * Sorted by Start Date descending in case of multiple entries (returns most recent).
  */
 export async function getMyRoster(
   userId: string,
 ): Promise<BubbleProgramRoster | null> {
   const constraints: BubbleConstraint[] = [
     { key: 'Subject', constraint_type: 'equals', value: userId },
-    { key: 'Status', constraint_type: 'equals', value: 'active' },
+    { key: 'Active', constraint_type: 'equals', value: true },
   ];
 
   const params = {
@@ -64,15 +64,18 @@ export async function getRoster(id: string): Promise<BubbleProgramRoster> {
 }
 
 /**
- * Fetches all active roster entries where the given user is the evaluator.
- * Used by FTOs and evaluators to see their assigned subjects.
+ * Fetches all active roster entries where the given user is the assigned trainer.
+ * Used by FTOs to see all their currently assigned trainees.
+ *
+ * Note: BubbleProgramRoster uses 'Assigned Trainer' for the primary trainer
+ * and 'Additional Trainers' for secondary assignments.
  */
 export async function getSubjectRosters(
   evaluatorId: string,
 ): Promise<BubbleProgramRoster[]> {
   const constraints: BubbleConstraint[] = [
-    { key: 'Evaluator', constraint_type: 'equals', value: evaluatorId },
-    { key: 'Status', constraint_type: 'equals', value: 'active' },
+    { key: 'Assigned Trainer', constraint_type: 'equals', value: evaluatorId },
+    { key: 'Active', constraint_type: 'equals', value: true },
   ];
 
   const params = {
@@ -88,8 +91,8 @@ export async function getSubjectRosters(
 }
 
 /**
- * Fetches all roster entries (any status) for a given subject.
- * Includes historical completed/withdrawn rosters for record display.
+ * Fetches all roster entries (active and historical) for a given subject.
+ * Includes completed and terminated enrollments for the record history view.
  */
 export async function getAllRostersForSubject(
   subjectId: string,
@@ -110,6 +113,7 @@ export async function getAllRostersForSubject(
 
 /**
  * Returns the current active program phase for a given roster entry.
+ * Reads the 'Current Phase' field from the roster and fetches the phase record.
  * Returns null if the roster has no current phase set.
  */
 export async function getCurrentPhase(
@@ -129,14 +133,14 @@ export async function getCurrentPhase(
 }
 
 /**
- * Fetches all phases belonging to a given program, sorted by Order ascending.
+ * Fetches all phases belonging to a given program, sorted by Rank ascending.
  */
 export async function getProgramPhases(
   programId: string,
 ): Promise<BubbleProgramPhase[]> {
   const params = {
     constraints: buildConstraints({ Program: programId }),
-    ...buildSortParams('Order', true),
+    ...buildSortParams('Rank', true),
     limit: 20,
   };
 
@@ -159,14 +163,15 @@ export async function getProgramPhase(id: string): Promise<BubbleProgramPhase> {
 // ─── Phase Requirements ───────────────────────────────────────────────────────
 
 /**
- * Fetches all phase requirements for a given program phase.
- * These define what a trainee must complete to advance to the next phase.
+ * Fetches all phase requirements for a given program phase, sorted by Rank.
+ * Requirements define what a trainee must complete to advance.
  */
 export async function getPhaseRequirements(
   phaseId: string,
 ): Promise<BubblePhaseRequirement[]> {
   const params = {
     constraints: buildConstraints({ 'Program Phase': phaseId }),
+    ...buildSortParams('Rank', true),
     limit: 50,
   };
 
@@ -187,19 +192,20 @@ export async function getProgram(id: string): Promise<BubbleProgram> {
 }
 
 /**
- * Fetches all active programs for an organization.
+ * Fetches all active programs.
+ * Optionally filters to programs belonging to a specific organization.
  */
 export async function getPrograms(
   orgId?: string,
 ): Promise<BubbleProgram[]> {
-  const filters: Record<string, unknown> = { 'Is Active': true };
+  const filters: Record<string, unknown> = { Active: true };
   if (orgId) {
-    filters['Organization'] = orgId;
+    filters['Organizations'] = orgId;
   }
 
   const params = {
     constraints: buildConstraints(filters),
-    ...buildSortParams('Name', true),
+    ...buildSortParams('Program Name', true),
     limit: 50,
   };
 

@@ -1,9 +1,7 @@
 /**
  * progressNotes.ts
- * Progress notes API — manages narrative notes written about a trainee's
- * progress during their program enrollment.
- *
- * Notes can be visible to the trainee or marked private (evaluator/admin only).
+ * Progress notes API — manages narrative observations written by trainers
+ * about trainees during their program enrollment.
  */
 
 import { get, post } from '../client';
@@ -17,17 +15,19 @@ import {
   type BubbleConstraint,
 } from '../bubble';
 import { normalizeBubbleList, normalizeBubbleSingle } from '../client';
-import type { BubbleProgressNote } from '../../types/index';
+import type {
+  BubbleProgressNote,
+  ProgressNoteReason,
+} from '../../types/progressNote';
 
 // ─── Fetch ────────────────────────────────────────────────────────────────────
 
 /**
  * Fetches all progress notes for a given subject (trainee).
  *
- * Note: Private notes (Is Private = true) are stored in Bubble with
- * privacy rules enforced server-side. The API will only return notes
- * the authenticated user is permitted to see, so no client-side filtering
- * is needed here.
+ * Bubble's server-side privacy rules control which notes are returned
+ * based on the authenticated user's role. Notes where 'Visible to Subject'
+ * is false are filtered by Bubble before they reach the client.
  *
  * Results are sorted newest first.
  */
@@ -48,8 +48,6 @@ export async function getProgressNotes(
 
 /**
  * Fetches progress notes for a subject filtered to a specific program roster.
- * Useful when a subject has multiple roster entries and you want notes
- * from only one enrollment period.
  */
 export async function getProgressNotesByRoster(
   subjectId: string,
@@ -97,6 +95,31 @@ export async function getProgressNotesByPhase(
 }
 
 /**
+ * Fetches progress notes filtered by reason category.
+ * Useful for showing only commendations, concerns, etc.
+ */
+export async function getProgressNotesByReason(
+  subjectId: string,
+  reason: ProgressNoteReason,
+): Promise<BubbleProgressNote[]> {
+  const constraints: BubbleConstraint[] = [
+    { key: 'Subject', constraint_type: 'equals', value: subjectId },
+    { key: 'Reason', constraint_type: 'equals', value: reason },
+  ];
+
+  const params = {
+    constraints: buildConstraintsFromArray(constraints),
+    ...buildSortParams('Created Date', false),
+    limit: 100,
+  };
+
+  const raw = await get<unknown>(dataUrl(BUBBLE_TYPES.PROGRESS_NOTE), {
+    params,
+  });
+  return normalizeBubbleList<BubbleProgressNote>(raw).results;
+}
+
+/**
  * Fetches a single progress note by ID.
  */
 export async function getProgressNote(id: string): Promise<BubbleProgressNote> {
@@ -109,8 +132,9 @@ export async function getProgressNote(id: string): Promise<BubbleProgressNote> {
 /**
  * Creates a new progress note for a subject.
  *
- * The author field should be set to the current authenticated user's ID.
- * The Created Date and Modified Date are managed by Bubble automatically.
+ * The Creator field should be the authenticated user's Bubble _id.
+ * The 'Note' field is the primary text content.
+ * 'Visible to Subject' controls whether the trainee can see this note.
  */
 export async function createProgressNote(
   data: Partial<BubbleProgressNote>,
@@ -118,17 +142,21 @@ export async function createProgressNote(
   if (!data['Subject']) {
     throw new Error('Subject ID is required to create a progress note');
   }
-  if (!data['Author']) {
-    throw new Error('Author ID is required to create a progress note');
+  if (!data['Creator']) {
+    throw new Error('Creator ID is required to create a progress note');
   }
-  if (!data['Note Text'] || (data['Note Text'] as string).trim().length === 0) {
+  if (!data['Note'] || (data['Note'] as string).trim().length === 0) {
     throw new Error('Note text is required and must not be empty');
+  }
+  if (!data['Reason']) {
+    throw new Error('Reason is required to create a progress note');
   }
 
   const payload: Partial<BubbleProgressNote> = {
     ...data,
-    'Note Text': (data['Note Text'] as string).trim(),
-    'Is Private': data['Is Private'] ?? false,
+    Note: (data['Note'] as string).trim(),
+    'Visible to Subject': data['Visible to Subject'] ?? false,
+    'Subject Acknowledged': false,
   };
 
   const raw = await post<unknown>(dataUrl(BUBBLE_TYPES.PROGRESS_NOTE), payload);
@@ -141,42 +169,48 @@ export async function createProgressNote(
 }
 
 /**
- * Creates a private progress note (visible only to evaluators and admins).
+ * Creates an internal-only progress note (not visible to the trainee).
  * Convenience wrapper around createProgressNote.
  */
-export async function createPrivateNote(
+export async function createInternalNote(
   subjectId: string,
-  authorId: string,
-  noteText: string,
+  creatorId: string,
+  note: string,
+  reason: ProgressNoteReason,
   rosterId?: string,
   phaseId?: string,
 ): Promise<BubbleProgressNote> {
   return createProgressNote({
     Subject: subjectId,
-    Author: authorId,
-    'Note Text': noteText,
-    'Is Private': true,
+    Creator: creatorId,
+    Note: note,
+    Reason: reason,
+    'Visible to Subject': false,
+    'Subject Acknowledged': false,
     'Program Roster': rosterId,
     'Program Phase': phaseId,
   });
 }
 
 /**
- * Creates a visible progress note (shared with the subject).
+ * Creates a progress note visible to the trainee.
  * Convenience wrapper around createProgressNote.
  */
 export async function createVisibleNote(
   subjectId: string,
-  authorId: string,
-  noteText: string,
+  creatorId: string,
+  note: string,
+  reason: ProgressNoteReason,
   rosterId?: string,
   phaseId?: string,
 ): Promise<BubbleProgressNote> {
   return createProgressNote({
     Subject: subjectId,
-    Author: authorId,
-    'Note Text': noteText,
-    'Is Private': false,
+    Creator: creatorId,
+    Note: note,
+    Reason: reason,
+    'Visible to Subject': true,
+    'Subject Acknowledged': false,
     'Program Roster': rosterId,
     'Program Phase': phaseId,
   });

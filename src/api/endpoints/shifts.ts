@@ -1,9 +1,11 @@
 /**
  * shifts.ts
- * Shift schedule API — manages shift records associated with EMS evaluations.
+ * Shift schedule API — reads shift records imported from external scheduling
+ * systems and surfaced in APEx360.
  *
- * Shifts represent scheduled work periods during which an evaluator may
- * conduct evaluations of their assigned subject.
+ * Shifts represent work periods for personnel. The Subject field identifies
+ * whose shift it is. Shifts do not have a direct Evaluator field — evaluation
+ * linking is done via BubbleEvalFormLog's 'Related Shift' reference.
  */
 
 import { get } from '../client';
@@ -17,25 +19,24 @@ import {
   type BubbleConstraint,
 } from '../bubble';
 import { normalizeBubbleList, normalizeBubbleSingle } from '../client';
-import type { BubbleShiftSchedule } from '../../types/index';
+import type { BubbleShiftSchedule, ShiftStatus } from '../../types/shift';
 
 // ─── Date Formatting ──────────────────────────────────────────────────────────
 
 /**
- * Formats a Date as an ISO 8601 date string (YYYY-MM-DD) for Bubble queries.
- * Bubble's date fields use ISO format for comparison constraints.
+ * Formats a Date as an ISO 8601 datetime string for Bubble comparison constraints.
  */
-function toISODateString(date: Date): string {
-  return date.toISOString().split('T')[0];
+function toISOString(date: Date): string {
+  return date.toISOString();
 }
 
 // ─── Shift Queries ────────────────────────────────────────────────────────────
 
 /**
- * Fetches shifts for the given user as subject.
- * Optionally restricts to a date range.
+ * Fetches shifts for the given user as the subject (the person working the shift).
+ * Optionally restricts to a date range using Start DateTime comparisons.
  *
- * Results are sorted by Shift Date ascending so upcoming shifts appear first.
+ * Results are sorted by Start DateTime ascending so upcoming shifts appear first.
  */
 export async function getMyShifts(
   userId: string,
@@ -48,23 +49,23 @@ export async function getMyShifts(
 
   if (from) {
     constraints.push({
-      key: 'Shift Date',
+      key: 'Start DateTime',
       constraint_type: 'greater than',
-      value: toISODateString(from),
+      value: toISOString(from),
     });
   }
 
   if (to) {
     constraints.push({
-      key: 'Shift Date',
+      key: 'Start DateTime',
       constraint_type: 'less than',
-      value: toISODateString(to),
+      value: toISOString(to),
     });
   }
 
   const params = {
     constraints: buildConstraintsFromArray(constraints),
-    ...buildSortParams('Shift Date', true),
+    ...buildSortParams('Start DateTime', true),
     limit: 100,
   };
 
@@ -83,24 +84,24 @@ export async function getShift(id: string): Promise<BubbleShiftSchedule> {
 }
 
 /**
- * Fetches shifts assigned to an evaluator where an evaluation is required
- * but has not yet been completed.
+ * Fetches shifts for the given evaluator (by their Subject ID) that are
+ * in 'completed' status — these are shifts where an evaluation could be
+ * or should have been conducted.
  *
- * These are the shifts the evaluator still needs to evaluate — the "action
- * required" list for evaluators.
+ * Note: The Shift Schedule type tracks the shift worker's data under 'Subject'.
+ * An evaluator querying their own completed shifts uses their user ID as Subject.
  */
 export async function getShiftsNeedingEval(
   evaluatorId: string,
 ): Promise<BubbleShiftSchedule[]> {
   const constraints: BubbleConstraint[] = [
-    { key: 'Evaluator', constraint_type: 'equals', value: evaluatorId },
-    { key: 'Eval Required', constraint_type: 'equals', value: true },
-    { key: 'Eval Completed', constraint_type: 'equals', value: false },
+    { key: 'Subject', constraint_type: 'equals', value: evaluatorId },
+    { key: 'Status', constraint_type: 'equals', value: 'completed' as ShiftStatus },
   ];
 
   const params = {
     constraints: buildConstraintsFromArray(constraints),
-    ...buildSortParams('Shift Date', false),
+    ...buildSortParams('End DateTime', false),
     limit: 50,
   };
 
@@ -111,56 +112,37 @@ export async function getShiftsNeedingEval(
 }
 
 /**
- * Fetches shifts for an evaluator within an optional date range.
- * Includes both completed and pending evaluations.
+ * Fetches all shifts for a given subject within an optional date range.
+ * Includes shifts of any status.
  */
-export async function getEvaluatorShifts(
-  evaluatorId: string,
+export async function getSubjectShifts(
+  subjectId: string,
   from?: Date,
   to?: Date,
 ): Promise<BubbleShiftSchedule[]> {
   const constraints: BubbleConstraint[] = [
-    { key: 'Evaluator', constraint_type: 'equals', value: evaluatorId },
+    { key: 'Subject', constraint_type: 'equals', value: subjectId },
   ];
 
   if (from) {
     constraints.push({
-      key: 'Shift Date',
+      key: 'Start DateTime',
       constraint_type: 'greater than',
-      value: toISODateString(from),
+      value: toISOString(from),
     });
   }
 
   if (to) {
     constraints.push({
-      key: 'Shift Date',
+      key: 'Start DateTime',
       constraint_type: 'less than',
-      value: toISODateString(to),
+      value: toISOString(to),
     });
   }
 
   const params = {
     constraints: buildConstraintsFromArray(constraints),
-    ...buildSortParams('Shift Date', false),
-    limit: 100,
-  };
-
-  const raw = await get<unknown>(dataUrl(BUBBLE_TYPES.SHIFT_SCHEDULE), {
-    params,
-  });
-  return normalizeBubbleList<BubbleShiftSchedule>(raw).results;
-}
-
-/**
- * Fetches all shifts for a given program roster entry.
- * Used to display the full shift history for a trainee.
- */
-export async function getShiftsByRoster(
-  rosterId: string,
-): Promise<BubbleShiftSchedule[]> {
-  const params = {
-    constraints: buildConstraints({ 'Program Roster': rosterId }),
-    ...buildSortParams('Shift Date', false),
+    ...buildSortParams('Start DateTime', false),
     limit: 200,
   };
 
@@ -171,15 +153,57 @@ export async function getShiftsByRoster(
 }
 
 /**
- * Fetches today's shifts for a given evaluator.
- * Convenience helper for the dashboard "today's shifts" widget.
+ * Fetches shifts currently in 'active' status for a given subject.
+ * Used for the "currently on shift" indicator on roster dashboards.
  */
-export async function getTodayShifts(
-  evaluatorId: string,
+export async function getActiveShifts(
+  subjectId: string,
 ): Promise<BubbleShiftSchedule[]> {
-  const today = new Date();
-  const tomorrow = new Date(today);
-  tomorrow.setDate(tomorrow.getDate() + 1);
+  const params = {
+    constraints: buildConstraintsFromArray([
+      { key: 'Subject', constraint_type: 'equals', value: subjectId },
+      { key: 'Status', constraint_type: 'equals', value: 'active' as ShiftStatus },
+    ]),
+    limit: 5,
+  };
 
-  return getEvaluatorShifts(evaluatorId, today, tomorrow);
+  const raw = await get<unknown>(dataUrl(BUBBLE_TYPES.SHIFT_SCHEDULE), {
+    params,
+  });
+  return normalizeBubbleList<BubbleShiftSchedule>(raw).results;
+}
+
+/**
+ * Fetches shifts for an organization filtered to a date window.
+ * Used for the shift overview on admin dashboards.
+ */
+export async function getOrganizationShifts(
+  orgId: string,
+  from: Date,
+  to: Date,
+): Promise<BubbleShiftSchedule[]> {
+  const constraints: BubbleConstraint[] = [
+    { key: 'Organization', constraint_type: 'equals', value: orgId },
+    {
+      key: 'Start DateTime',
+      constraint_type: 'greater than',
+      value: toISOString(from),
+    },
+    {
+      key: 'Start DateTime',
+      constraint_type: 'less than',
+      value: toISOString(to),
+    },
+  ];
+
+  const params = {
+    constraints: buildConstraintsFromArray(constraints),
+    ...buildSortParams('Start DateTime', true),
+    limit: 200,
+  };
+
+  const raw = await get<unknown>(dataUrl(BUBBLE_TYPES.SHIFT_SCHEDULE), {
+    params,
+  });
+  return normalizeBubbleList<BubbleShiftSchedule>(raw).results;
 }

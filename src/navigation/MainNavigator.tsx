@@ -20,7 +20,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import type { ComponentProps } from 'react';
 
-import { colors, shadows } from '@/theme';
+import { colors } from '@/theme';
 import { useEvalStore } from '@/store/evalStore';
 import type {
   MainTabParamList,

@@ -3,7 +3,7 @@
  * Taskbook API — manages task completion logs within a training program phase.
  *
  * Tasks are discrete checklist items a trainee must complete during a phase.
- * BubbleTaskbookLog records track the per-trainee status of each task.
+ * BubbleTaskbookLog records track per-trainee completion of each task.
  */
 
 import { get, post, patch } from '../client';
@@ -17,28 +17,26 @@ import {
   type BubbleConstraint,
 } from '../bubble';
 import { normalizeBubbleList, normalizeBubbleSingle } from '../client';
-import type { BubbleTaskbookLog, BubbleTask } from '../../types/index';
+import type { BubbleTaskbookLog, BubbleTask } from '../../types/taskbook';
 
 // ─── Taskbook Log Queries ─────────────────────────────────────────────────────
 
 /**
- * Fetches all taskbook log entries for a given program roster.
+ * Fetches all taskbook log entries for a given trainee and phase.
+ * The `subjectId` maps to the 'Intern User' field on BubbleTaskbookLog.
  * Optionally filters to a specific program phase.
- *
- * Returns all tasks regardless of completion status so the UI can render
- * the full taskbook checklist with completion indicators.
  */
 export async function getTaskbookLogs(
-  rosterId: string,
+  subjectId: string,
   phaseId?: string,
 ): Promise<BubbleTaskbookLog[]> {
   const constraints: BubbleConstraint[] = [
-    { key: 'Program Roster', constraint_type: 'equals', value: rosterId },
+    { key: 'Intern User', constraint_type: 'equals', value: subjectId },
   ];
 
   if (phaseId) {
     constraints.push({
-      key: 'Program Phase',
+      key: 'Phase',
       constraint_type: 'equals',
       value: phaseId,
     });
@@ -46,7 +44,7 @@ export async function getTaskbookLogs(
 
   const params = {
     constraints: buildConstraintsFromArray(constraints),
-    ...buildSortParams('Created Date', true),
+    ...buildSortParams('Completed At', true),
     limit: 200,
   };
 
@@ -63,22 +61,41 @@ export async function getTaskbookLog(id: string): Promise<BubbleTaskbookLog> {
 }
 
 /**
- * Fetches taskbook logs filtered by status for a given roster.
- * Useful for showing "pending tasks" or "completed tasks" lists.
+ * Fetches taskbook logs for a requirement, filtered by completion status.
+ * Useful for showing "completed" vs "pending cosign" vs "not yet attempted".
  */
-export async function getTaskbookLogsByStatus(
-  rosterId: string,
-  status: BubbleTaskbookLog['Status'],
+export async function getTaskbookLogsByRequirement(
+  requirementId: string,
+  subjectId: string,
+): Promise<BubbleTaskbookLog[]> {
+  const constraints: BubbleConstraint[] = [
+    { key: 'Requirement', constraint_type: 'equals', value: requirementId },
+    { key: 'Intern User', constraint_type: 'equals', value: subjectId },
+  ];
+
+  const params = {
+    constraints: buildConstraintsFromArray(constraints),
+    ...buildSortParams('Completed At', true),
+    limit: 50,
+  };
+
+  const raw = await get<unknown>(dataUrl(BUBBLE_TYPES.TASKBOOK_LOG), { params });
+  return normalizeBubbleList<BubbleTaskbookLog>(raw).results;
+}
+
+/**
+ * Fetches all taskbook logs awaiting cosign from a given trainer/evaluator.
+ */
+export async function getCosignPendingLogs(
   phaseId?: string,
 ): Promise<BubbleTaskbookLog[]> {
   const constraints: BubbleConstraint[] = [
-    { key: 'Program Roster', constraint_type: 'equals', value: rosterId },
-    { key: 'Status', constraint_type: 'equals', value: status },
+    { key: 'Cosign Pending', constraint_type: 'equals', value: true },
   ];
 
   if (phaseId) {
     constraints.push({
-      key: 'Program Phase',
+      key: 'Phase',
       constraint_type: 'equals',
       value: phaseId,
     });
@@ -86,8 +103,8 @@ export async function getTaskbookLogsByStatus(
 
   const params = {
     constraints: buildConstraintsFromArray(constraints),
-    ...buildSortParams('Created Date', true),
-    limit: 200,
+    ...buildSortParams('Completed At', false),
+    limit: 100,
   };
 
   const raw = await get<unknown>(dataUrl(BUBBLE_TYPES.TASKBOOK_LOG), { params });
@@ -97,9 +114,7 @@ export async function getTaskbookLogsByStatus(
 // ─── Create / Update ─────────────────────────────────────────────────────────
 
 /**
- * Creates a new taskbook log record.
- * Typically called when a program phase starts and tasks need to be
- * initialized for a trainee (one log per task per roster).
+ * Creates a new taskbook log record for a task completion attempt.
  */
 export async function createTaskbookLog(
   data: Partial<BubbleTaskbookLog>,
@@ -126,39 +141,45 @@ export async function updateTaskbookLog(
 // ─── Task Completion ──────────────────────────────────────────────────────────
 
 /**
- * Marks a taskbook log entry as complete.
+ * Marks a taskbook log entry as successfully complete.
  *
- * Sets Status to 'complete', records the completing user, and timestamps
- * the completion. The server-side Bubble workflow may also update phase
- * progress counters.
+ * Sets Success to true and records the completing user and timestamp.
+ * If the task requires cosign, sets Cosign Pending to true.
  */
 export async function markTaskComplete(
   logId: string,
   completedBy: string,
 ): Promise<BubbleTaskbookLog> {
   const data: Partial<BubbleTaskbookLog> = {
-    Status: 'complete',
+    Success: true,
     'Completed By': completedBy,
-    'Completed Date': new Date().toISOString(),
+    'Completed At': new Date().toISOString(),
   };
 
   return updateTaskbookLog(logId, data);
 }
 
 /**
- * Marks a taskbook log entry as in_progress.
- * Used when an evaluator begins working through a task with a trainee.
+ * Records a cosign on a taskbook log entry.
+ * Clears the Cosign Pending flag and records the cosigning user.
  */
-export async function startTask(logId: string): Promise<BubbleTaskbookLog> {
-  return updateTaskbookLog(logId, { Status: 'in_progress' });
+export async function cosignTaskLog(
+  logId: string,
+  cosignedBy: string,
+): Promise<BubbleTaskbookLog> {
+  const data: Partial<BubbleTaskbookLog> = {
+    'Cosign Pending': false,
+    'Cosigned By': cosignedBy,
+    'Cosigned At': new Date().toISOString(),
+  };
+
+  return updateTaskbookLog(logId, data);
 }
 
 // ─── Task Definitions ─────────────────────────────────────────────────────────
 
 /**
  * Fetches a task definition record by ID.
- * Task definitions describe what needs to be done; taskbook logs track
- * whether it's been done for a specific trainee.
  */
 export async function getTask(id: string): Promise<BubbleTask> {
   const raw = await get<unknown>(dataUrlById(BUBBLE_TYPES.TASK, id));
@@ -166,13 +187,13 @@ export async function getTask(id: string): Promise<BubbleTask> {
 }
 
 /**
- * Fetches all task definitions for a given program phase, sorted by Order.
+ * Fetches all active task definitions.
+ * Tasks are referenced by phase requirements and taskbook logs.
  */
-export async function getTasksByPhase(phaseId: string): Promise<BubbleTask[]> {
+export async function getAllTasks(): Promise<BubbleTask[]> {
   const params = {
-    constraints: buildConstraints({ 'Program Phase': phaseId }),
-    ...buildSortParams('Order', true),
-    limit: 100,
+    constraints: buildConstraints({ Active: true }),
+    limit: 200,
   };
 
   const raw = await get<unknown>(dataUrl(BUBBLE_TYPES.TASK), { params });
