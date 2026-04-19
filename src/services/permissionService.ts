@@ -2,28 +2,24 @@
  * permissionService.ts
  * Permission service — interprets Bubble data to determine access rights.
  *
- * All permission decisions are derived from the data returned by Bubble.
- * There is no hardcoded business logic about specific role names or field
- * values — all checks read from the Bubble objects themselves.
- *
- * This keeps the app in sync with permission model changes made in Bubble
- * without requiring a client app update.
+ * All permission decisions are derived from fields on Bubble objects returned
+ * by the API. No hardcoded business logic or role names exist here — all
+ * checks read from the actual data so that permission model changes made in
+ * Bubble are automatically reflected without a client app update.
  */
 
 import type { BubbleUser, APExRole } from '../types/user';
 import type {
   BubbleEvalFormSettings,
-  BubbleEvalForm,
 } from '../types/evalForm';
 import type { BubbleEvalFormLog } from '../types/evalFormLog';
 import type { BubbleFormWorkflowStep } from '../types/workflow';
-import type { BubbleProgramRoster } from '../types/index';
+import type { BubbleProgramRoster } from '../types/roster';
 
 // ─── Role Helpers ─────────────────────────────────────────────────────────────
 
 /**
  * Returns all roles the user holds — primary role plus any additional roles.
- * Used for permission checks that require union role membership.
  */
 function getAllRoles(user: BubbleUser): APExRole[] {
   const roles: APExRole[] = [];
@@ -50,10 +46,8 @@ function userHasAnyRole(user: BubbleUser, roles: APExRole[]): boolean {
  * Returns true if the user is permitted to create a new evaluation
  * using the given form settings.
  *
- * Reads the 'Created By Roles' field from BubbleEvalFormSettings — this
- * field is managed in Bubble and defines which roles may initiate evals.
- * Falls back to checking if the user is an evaluator or admin if the field
- * is not configured.
+ * Reads the 'Created By Roles' field from BubbleEvalFormSettings when
+ * available, falling back to checking evaluator/admin roles.
  */
 export function canCreateEval(
   user: BubbleUser,
@@ -81,11 +75,8 @@ export function canCreateEval(
  * Returns true if the user can edit/enter scores for the given eval log.
  *
  * Score editing is permitted when:
- *  1. The user is the evaluator on the log AND
- *  2. The eval is in an editable state (draft or in_progress) AND
- *  3. The user has the evaluator role (or admin)
- *
- * Reads form settings' 'Editable Roles' if available for finer control.
+ *  1. The eval is in an editable state (draft or in_progress)
+ *  2. The user is the assigned evaluator OR is an admin
  */
 export function canEditScores(
   user: BubbleUser,
@@ -109,11 +100,10 @@ export function canEditScores(
 // ─── Approval ────────────────────────────────────────────────────────────────
 
 /**
- * Returns true if the user can approve the eval at the given workflow step.
+ * Returns true if the user can approve/action the eval at the current step.
  *
  * Reads the step's 'Reviewer Roles', 'Subject Must Action', and
- * 'Evaluator Must Action' fields from Bubble to determine who is allowed
- * to action this step.
+ * 'Evaluator Must Action' fields from Bubble.
  */
 export function canApprove(
   user: BubbleUser,
@@ -121,6 +111,9 @@ export function canApprove(
   formLog?: BubbleEvalFormLog,
 ): boolean {
   if (!user['APEx Access']) return false;
+
+  // Admin can always act
+  if (userHasAnyRole(user, ['admin'])) return true;
 
   // Check if this step requires the subject specifically
   if (currentStep['Subject Must Action']) {
@@ -138,8 +131,7 @@ export function canApprove(
     return userHasAnyRole(user, reviewerRoles);
   }
 
-  // Default: admin can always approve
-  return userHasAnyRole(user, ['admin']);
+  return false;
 }
 
 // ─── Dispute ─────────────────────────────────────────────────────────────────
@@ -150,8 +142,8 @@ export function canApprove(
  * Reads 'Allow Dispute' from BubbleEvalFormSettings and checks:
  *  1. Dispute is enabled on the form settings
  *  2. The user is the subject of the evaluation
- *  3. The eval is in an approvable/approved state (not already complete/archived)
- *  4. If a dispute window is configured, the eval was approved within the window
+ *  3. The eval is in an approvable/approved state
+ *  4. The dispute window has not expired (if 'Dispute Window Days' is set)
  */
 export function canDispute(
   user: BubbleUser,
@@ -166,7 +158,7 @@ export function canDispute(
   // Only the subject can dispute their own evaluation
   if (formLog.Subject !== user._id) return false;
 
-  // Can only dispute evals that have been approved (not draft/complete/archived)
+  // Can only dispute evals in review or approved state
   const disputeableStatuses: BubbleEvalFormLog['Status'][] = [
     'approved',
     'pending_review',
@@ -175,7 +167,11 @@ export function canDispute(
 
   // Check dispute window if configured
   const disputeWindowDays = formSettings['Dispute Window Days'];
-  if (disputeWindowDays && disputeWindowDays > 0 && formLog['Approved At']) {
+  if (
+    disputeWindowDays &&
+    disputeWindowDays > 0 &&
+    formLog['Approved At']
+  ) {
     const approvedAt = new Date(formLog['Approved At']);
     const windowExpiry = new Date(
       approvedAt.getTime() + disputeWindowDays * 24 * 60 * 60 * 1000,
@@ -191,9 +187,11 @@ export function canDispute(
 /**
  * Returns true if the user can view the taskbook for the given roster entry.
  *
- * The subject can always view their own taskbook.
- * The assigned evaluator can view their subject's taskbook.
- * Reviewers and admins can view all taskbooks.
+ * Access rules:
+ *  - Subject: can always see their own taskbook
+ *  - Assigned Trainer: can see their trainee's taskbook
+ *  - Additional Trainers: can see the taskbook (checked via field list)
+ *  - Reviewer / Admin: universal access
  */
 export function canViewTaskbook(
   user: BubbleUser,
@@ -201,14 +199,18 @@ export function canViewTaskbook(
 ): boolean {
   if (!user['APEx Access']) return false;
 
-  // Admin and reviewer can see all
+  // Admin and reviewer see all
   if (userHasAnyRole(user, ['admin', 'reviewer'])) return true;
 
-  // Subject can see their own
+  // Subject sees their own
   if (roster.Subject === user._id) return true;
 
-  // Evaluator can see their assigned subjects
-  if (roster.Evaluator === user._id) return true;
+  // Assigned trainer sees their trainee
+  if (roster['Assigned Trainer'] === user._id) return true;
+
+  // Additional trainers see the trainee
+  const additionalTrainers = roster['Additional Trainers'] ?? [];
+  if (additionalTrainers.includes(user._id)) return true;
 
   return false;
 }
@@ -237,7 +239,6 @@ export function isEvaluator(
 
 /**
  * Returns true if the user holds a reviewer or admin role.
- * Reviewers are not necessarily linked to specific evaluations.
  */
 export function isReviewer(user: BubbleUser): boolean {
   return userHasAnyRole(user, ['reviewer', 'admin']);
@@ -246,19 +247,14 @@ export function isReviewer(user: BubbleUser): boolean {
 // ─── Effective Role ───────────────────────────────────────────────────────────
 
 /**
- * Returns the most contextually appropriate role for a user given an
+ * Returns the most contextually appropriate role for the user given an
  * optional evaluation form log.
  *
- * When a formLog is provided, the role is determined by the user's
- * relationship to that specific evaluation.
- *
- * When no formLog is provided, returns the user's primary APEx role.
- *
  * Priority (when formLog is present):
- *  1. admin (always admin)
- *  2. subject (if user is the eval subject)
- *  3. evaluator (if user is the eval evaluator)
- *  4. reviewer (if user holds reviewer role)
+ *  1. admin (always admin regardless of context)
+ *  2. subject (user is the eval's subject)
+ *  3. evaluator (user is the eval's evaluator)
+ *  4. reviewer (user holds reviewer role)
  *  5. primary APEx role as fallback
  */
 export function getEffectiveRole(
@@ -271,21 +267,19 @@ export function getEffectiveRole(
   if (userRoles.includes('admin')) return 'admin';
 
   if (formLog) {
-    // Check relationship to this specific eval
     if (formLog.Subject === user._id) return 'subject';
     if (formLog.Evaluator === user._id) return 'evaluator';
     if (userRoles.includes('reviewer')) return 'reviewer';
   }
 
-  // Fall back to primary role
   return user['APEx Role'] ?? 'subject';
 }
 
 // ─── Self-Eval Check ─────────────────────────────────────────────────────────
 
 /**
- * Returns true if the user is permitted to create a self-evaluation using
- * the given form settings.
+ * Returns true if the user is permitted to create a self-evaluation
+ * based on the form settings.
  */
 export function canSelfEval(
   user: BubbleUser,
@@ -298,8 +292,11 @@ export function canSelfEval(
 // ─── Score Visibility ────────────────────────────────────────────────────────
 
 /**
- * Returns true if the user is permitted to see their own scores on a
- * completed evaluation.
+ * Returns true if the user is permitted to see scores on the given evaluation.
+ *
+ * Admins and reviewers always have access. Evaluators see the scores they
+ * entered. Subject visibility is controlled by 'Subject Can View Scores'
+ * in the form settings.
  */
 export function canViewOwnScores(
   user: BubbleUser,
@@ -308,13 +305,9 @@ export function canViewOwnScores(
 ): boolean {
   if (!user['APEx Access']) return false;
 
-  // Admins and reviewers can always see scores
   if (userHasAnyRole(user, ['admin', 'reviewer'])) return true;
-
-  // Evaluator can always see the scores they entered
   if (formLog.Evaluator === user._id) return true;
 
-  // Subject visibility is controlled by form settings
   if (formLog.Subject === user._id) {
     return formSettings['Subject Can View Scores'] === true;
   }

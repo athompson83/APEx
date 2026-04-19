@@ -144,6 +144,12 @@ export type PhaseDetailScreenProps = NativeStackScreenProps<ProgressStackParamLi
 
 // Profile screens
 export type ProfileHomeScreenProps = NativeStackScreenProps<ProfileStackParamList, 'ProfileHome'>;
+export type EditProfileScreenProps = NativeStackScreenProps<ProfileStackParamList, 'EditProfile'>;
+export type AuditLogScreenProps = NativeStackScreenProps<ProfileStackParamList, 'AuditLog'>;
+export type AppSettingsScreenProps = NativeStackScreenProps<ProfileStackParamList, 'AppSettings'>;
+
+// Dashboard
+export type DashboardScreenProps = BottomTabScreenProps<MainTabParamList, 'Dashboard'>;
 
 // ─── Route prop helpers ───────────────────────────────────────────────────────
 

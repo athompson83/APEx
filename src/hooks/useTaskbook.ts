@@ -104,12 +104,12 @@ async function fetchRequirements(phaseId: string): Promise<BubblePhaseRequiremen
 }
 
 async function fetchTaskbookLogs(
-  rosterId: string,
+  subjectId: string,
   phaseId: string,
 ): Promise<BubbleTaskbookLog[]> {
   const params = {
     constraints: buildConstraintsFromArray([
-      { key: 'Program Roster', constraint_type: 'equals' as const, value: rosterId },
+      { key: 'Intern User', constraint_type: 'equals' as const, value: subjectId },
       { key: 'Phase', constraint_type: 'equals' as const, value: phaseId },
     ]),
     limit: 500,
@@ -196,10 +196,11 @@ export function useTaskbookState(
 
       const phase = await fetchPhaseById(roster['Current Phase']);
 
-      // Fetch everything needed in parallel
+      // Fetch everything needed in parallel.
+      // taskbookLogs are filtered by subject user ID + phase (no roster field on the log).
       const [requirements, taskbookLogs, tasks, assessments] = await Promise.all([
         fetchRequirements(phase._id),
-        fetchTaskbookLogs(rosterId, phase._id),
+        fetchTaskbookLogs(roster.Subject, phase._id),
         fetchTasksForPhase(phase._id),
         fetchAssessmentsForPhase(phase._id),
       ]);
@@ -242,6 +243,7 @@ export function useSubjectRosters(): UseQueryResult<BubbleProgramRoster[], Error
 
 export interface MarkTaskCompleteVariables {
   rosterId: string;
+  programId: string;
   phaseId: string;
   requirementId: string;
   taskRefId?: string;
@@ -263,7 +265,7 @@ export function useMarkTaskComplete(): UseMutationResult<
 
   return useMutation({
     mutationFn: async ({
-      rosterId,
+      programId,
       phaseId,
       requirementId,
       taskRefId,
@@ -274,6 +276,7 @@ export function useMarkTaskComplete(): UseMutationResult<
 
       const payload: Partial<BubbleTaskbookLog> = {
         'Intern User': user._id,
+        Program: programId,
         Phase: phaseId,
         Requirement: requirementId,
         'Task Ref': taskRefId,

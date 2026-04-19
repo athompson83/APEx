@@ -42,14 +42,6 @@ export async function getActiveFormLogs(
   userId: string,
   role: APExRole,
 ): Promise<BubbleEvalFormLog[]> {
-  const statusConstraints: BubbleConstraint[] = ACTIVE_STATUSES.map(
-    (status) => ({
-      key: 'Status',
-      constraint_type: 'in',
-      value: ACTIVE_STATUSES,
-    }),
-  ).slice(0, 1); // Only need one `in` constraint
-
   const constraints: BubbleConstraint[] = [
     { key: 'Status', constraint_type: 'in', value: ACTIVE_STATUSES },
   ];

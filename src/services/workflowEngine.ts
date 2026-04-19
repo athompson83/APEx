@@ -14,7 +14,6 @@ import type { BubbleEvalFormSettings } from '../types/evalForm';
 import type { BubbleEvalFormLog } from '../types/evalFormLog';
 import type {
   BubbleFormWorkflowStep,
-  BubbleEvalWorkflowLog,
   WorkflowAction,
 } from '../types/workflow';
 
@@ -140,12 +139,8 @@ export function getAvailableActions(
     return [];
   }
 
-  // Start with the actions allowed by the step definition
-  // We treat the step as allowing all standard actions if not configured,
-  // then filter by the dispute setting
-  const baseActions: WorkflowAction[] = ['approve', 'dispute', 'submit', 'return'];
-
   // Determine which actions are semantically valid at this step
+  // based on the eval's current status and the step's configuration
   const available: WorkflowAction[] = [];
 
   // 'submit' is valid if this is the first step and the eval is in_progress/draft
