@@ -1,0 +1,440 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* =============================================================================
+   APEx Hub — Global CSS
+   ShadCN-compatible CSS custom properties for light and dark themes.
+   The app ships with a slate/zinc-based dark theme as the default.
+   ============================================================================= */
+
+@layer base {
+  /* ---------------------------------------------------------------------------
+     Light mode — kept complete for optional future use
+     --------------------------------------------------------------------------- */
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 222.2 84% 4.9%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 222.2 84% 4.9%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 222.2 84% 4.9%;
+
+    --primary: 234 89% 65%;
+    --primary-foreground: 210 40% 98%;
+
+    --secondary: 210 40% 96.1%;
+    --secondary-foreground: 222.2 47.4% 11.2%;
+
+    --muted: 210 40% 96.1%;
+    --muted-foreground: 215.4 16.3% 46.9%;
+
+    --accent: 210 40% 96.1%;
+    --accent-foreground: 222.2 47.4% 11.2%;
+
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 214.3 31.8% 91.4%;
+    --input: 214.3 31.8% 91.4%;
+    --ring: 234 89% 65%;
+
+    --radius: 0.5rem;
+
+    /* Sidebar */
+    --sidebar-background: 0 0% 98%;
+    --sidebar-foreground: 240 5.3% 26.1%;
+    --sidebar-primary: 240 5.9% 10%;
+    --sidebar-primary-foreground: 0 0% 98%;
+    --sidebar-accent: 240 4.8% 95.9%;
+    --sidebar-accent-foreground: 240 5.9% 10%;
+    --sidebar-border: 220 13% 91%;
+    --sidebar-ring: 234 89% 65%;
+
+    /* Chart colors */
+    --chart-1: 12 76% 61%;
+    --chart-2: 173 58% 39%;
+    --chart-3: 197 37% 24%;
+    --chart-4: 43 74% 66%;
+    --chart-5: 27 87% 67%;
+  }
+
+  /* ---------------------------------------------------------------------------
+     Dark mode — Slate/Zinc-based dark theme (default for APEx Hub)
+     --------------------------------------------------------------------------- */
+  .dark {
+    /* Page background: near-black slate */
+    --background: 222 47% 5%;
+    --foreground: 210 40% 94%;
+
+    /* Card surfaces: slightly elevated slate */
+    --card: 222 47% 8%;
+    --card-foreground: 210 40% 94%;
+
+    /* Popover/dropdown surfaces */
+    --popover: 222 47% 7%;
+    --popover-foreground: 210 40% 94%;
+
+    /* Brand primary: bright indigo */
+    --primary: 234 89% 65%;
+    --primary-foreground: 222.2 47.4% 1%;
+
+    /* Secondary: muted slate button */
+    --secondary: 217 33% 14%;
+    --secondary-foreground: 210 40% 90%;
+
+    /* Muted: subtle slate */
+    --muted: 217 33% 12%;
+    --muted-foreground: 215 20% 55%;
+
+    /* Accent: slightly brighter slate for hover states */
+    --accent: 217 33% 16%;
+    --accent-foreground: 210 40% 90%;
+
+    /* Destructive: warm red */
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 210 40% 98%;
+
+    /* Borders and inputs: subtle slate lines */
+    --border: 217 33% 18%;
+    --input: 217 33% 16%;
+    --ring: 234 89% 65%;
+
+    /* Sidebar: distinct from card, slightly darker */
+    --sidebar-background: 222 47% 6%;
+    --sidebar-foreground: 215 20% 70%;
+    --sidebar-primary: 234 89% 65%;
+    --sidebar-primary-foreground: 222 47% 5%;
+    --sidebar-accent: 217 33% 14%;
+    --sidebar-accent-foreground: 210 40% 90%;
+    --sidebar-border: 217 33% 14%;
+    --sidebar-ring: 234 89% 65%;
+
+    /* Chart colors for dark mode */
+    --chart-1: 220 70% 50%;
+    --chart-2: 160 60% 45%;
+    --chart-3: 30 80% 55%;
+    --chart-4: 280 65% 60%;
+    --chart-5: 340 75% 55%;
+  }
+}
+
+/* =============================================================================
+   Base Layer — Reset and global element styles
+   ============================================================================= */
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html {
+    @apply scroll-smooth;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-synthesis: none;
+  }
+
+  /* Default dark mode — APEx Hub uses dark-first */
+  :root {
+    color-scheme: dark;
+  }
+
+  html.light {
+    color-scheme: light;
+  }
+
+  /* Focus rings */
+  :focus-visible {
+    @apply outline-none ring-2 ring-ring ring-offset-2 ring-offset-background;
+  }
+
+  /* Remove default button focus outline — replaced by focus-visible above */
+  button:focus {
+    outline: none;
+  }
+
+  /* Scrollbar styling (webkit) */
+  ::-webkit-scrollbar {
+    @apply w-1.5 h-1.5;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply rounded-full bg-border;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-muted-foreground/30;
+  }
+
+  /* Firefox scrollbar */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--border)) transparent;
+  }
+
+  /* Selection */
+  ::selection {
+    @apply bg-primary/20 text-primary-foreground;
+  }
+
+  /* Typography defaults */
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    @apply font-semibold tracking-tight;
+  }
+
+  h1 {
+    @apply text-4xl;
+  }
+
+  h2 {
+    @apply text-3xl;
+  }
+
+  h3 {
+    @apply text-2xl;
+  }
+
+  h4 {
+    @apply text-xl;
+  }
+
+  p {
+    @apply leading-7;
+  }
+
+  a {
+    @apply text-primary underline-offset-4 hover:underline;
+  }
+
+  code {
+    @apply relative rounded bg-muted px-[0.3rem] py-[0.2rem] font-mono text-sm;
+  }
+
+  pre {
+    @apply overflow-x-auto rounded-lg border bg-muted p-4 font-mono text-sm;
+  }
+
+  pre code {
+    @apply bg-transparent p-0;
+  }
+
+  hr {
+    @apply border-border;
+  }
+
+  /* Table defaults */
+  table {
+    @apply w-full text-sm;
+  }
+
+  thead {
+    @apply border-b;
+  }
+
+  th {
+    @apply h-10 px-4 text-left align-middle font-medium text-muted-foreground;
+  }
+
+  td {
+    @apply p-4 align-middle;
+  }
+
+  tr {
+    @apply border-b transition-colors hover:bg-muted/50;
+  }
+
+  /* Input defaults */
+  input,
+  textarea,
+  select {
+    @apply bg-input;
+  }
+
+  /* Disabled states */
+  [disabled],
+  [aria-disabled="true"] {
+    @apply cursor-not-allowed opacity-50;
+  }
+}
+
+/* =============================================================================
+   Components Layer — Reusable component styles
+   ============================================================================= */
+
+@layer components {
+  /* Page container */
+  .page-container {
+    @apply mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8;
+  }
+
+  /* Section spacing */
+  .section {
+    @apply py-8 md:py-12;
+  }
+
+  /* Card base */
+  .card-base {
+    @apply rounded-lg border bg-card text-card-foreground shadow-sm;
+  }
+
+  /* Gradient text */
+  .gradient-text {
+    @apply bg-gradient-to-r from-primary to-blue-400 bg-clip-text text-transparent;
+  }
+
+  /* Glass effect */
+  .glass {
+    @apply border border-white/10 bg-white/5 backdrop-blur-sm;
+  }
+
+  /* Glow ring on focus for primary interactive elements */
+  .glow-ring {
+    @apply ring-2 ring-primary/50 ring-offset-2 ring-offset-background;
+  }
+
+  /* Status badges */
+  .status-dot {
+    @apply inline-block h-2 w-2 rounded-full;
+  }
+
+  .status-dot--active {
+    @apply bg-emerald-500;
+  }
+
+  .status-dot--idle {
+    @apply bg-amber-500;
+  }
+
+  .status-dot--offline {
+    @apply bg-muted-foreground;
+  }
+
+  .status-dot--error {
+    @apply bg-destructive;
+  }
+
+  /* Shimmer loading skeleton */
+  .skeleton {
+    @apply animate-shimmer rounded-md bg-muted;
+    background-size: 200% 100%;
+    background-image: linear-gradient(
+      90deg,
+      hsl(var(--muted)) 25%,
+      hsl(var(--accent)) 50%,
+      hsl(var(--muted)) 75%
+    );
+  }
+
+  /* Code block with syntax label */
+  .code-block {
+    @apply relative overflow-hidden rounded-lg border bg-muted;
+  }
+
+  /* Sidebar nav item */
+  .nav-item {
+    @apply flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground;
+  }
+
+  .nav-item--active {
+    @apply bg-accent text-accent-foreground;
+  }
+
+  /* Empty state */
+  .empty-state {
+    @apply flex flex-col items-center justify-center py-16 text-center;
+  }
+
+  /* Full-page loading screen */
+  .loading-screen {
+    @apply fixed inset-0 z-50 flex items-center justify-center bg-background;
+  }
+}
+
+/* =============================================================================
+   Utilities Layer — One-off utility classes
+   ============================================================================= */
+
+@layer utilities {
+  /* Hide scrollbar but retain scroll behaviour */
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* Stable scrollbar gutter to prevent layout shift */
+  .scrollbar-gutter {
+    scrollbar-gutter: stable;
+  }
+
+  /* Text balance for headings */
+  .text-balance {
+    text-wrap: balance;
+  }
+
+  /* Prevent text selection */
+  .select-none {
+    user-select: none;
+  }
+
+  /* Fixed-aspect-ratio containers */
+  .aspect-video-container {
+    @apply relative overflow-hidden;
+    aspect-ratio: 16 / 9;
+  }
+
+  /* Truncate multi-line text */
+  .line-clamp-2 {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .line-clamp-3 {
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  /* Inset shadow for depth */
+  .shadow-inset-sm {
+    box-shadow: inset 0 1px 2px 0 rgb(0 0 0 / 0.1);
+  }
+
+  /* Brand glow */
+  .glow {
+    box-shadow: 0 0 20px hsl(var(--primary) / 0.3);
+  }
+
+  .glow-sm {
+    box-shadow: 0 0 10px hsl(var(--primary) / 0.2);
+  }
+
+  /* Ensure consistent min-height for full-page layouts */
+  .min-h-page {
+    min-height: calc(100vh - 4rem);
+  }
+}

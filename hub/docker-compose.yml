@@ -1,0 +1,143 @@
+# =============================================================================
+# APEx Hub — Docker Compose (development + production)
+# =============================================================================
+# Usage:
+#   docker-compose up -d              # start all services
+#   docker-compose up -d app worker   # start only app + worker
+#   docker-compose logs -f app        # tail app logs
+#   docker-compose down -v            # stop and delete volumes
+# =============================================================================
+
+version: "3.9"
+
+services:
+  # ---------------------------------------------------------------------------
+  # PostgreSQL database
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    container_name: apex-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: apex_hub
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - apex-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d apex_hub"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # ---------------------------------------------------------------------------
+  # Redis — BullMQ job queue + caching
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: apex-redis
+    restart: unless-stopped
+    command: >
+      redis-server
+      --appendonly yes
+      --appendfsync everysec
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    networks:
+      - apex-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ---------------------------------------------------------------------------
+  # Next.js application
+  # ---------------------------------------------------------------------------
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runner
+    container_name: apex-app
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
+    environment:
+      # Override database URL to use service name instead of localhost
+      DATABASE_URL: "postgresql://postgres:postgres@postgres:5432/apex_hub"
+      DIRECT_URL: "postgresql://postgres:postgres@postgres:5432/apex_hub"
+      REDIS_URL: "redis://redis:6379"
+      NODE_ENV: production
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - apex-network
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # ---------------------------------------------------------------------------
+  # BullMQ worker process
+  # Runs the same image as app but executes the worker entrypoint instead of
+  # Next.js, so it processes document ingestion, AI tasks, workflows, and
+  # memory extraction jobs from the Redis queues.
+  # ---------------------------------------------------------------------------
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runner
+    container_name: apex-worker
+    restart: unless-stopped
+    command: ["node", "dist/worker.js"]
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: "postgresql://postgres:postgres@postgres:5432/apex_hub"
+      DIRECT_URL: "postgresql://postgres:postgres@postgres:5432/apex_hub"
+      REDIS_URL: "redis://redis:6379"
+      NODE_ENV: production
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - apex-network
+
+# =============================================================================
+# Named volumes — data persists across container restarts
+# =============================================================================
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+
+# =============================================================================
+# Networks
+# =============================================================================
+networks:
+  apex-network:
+    driver: bridge
+    name: apex-network

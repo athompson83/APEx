@@ -1,0 +1,50 @@
+# Dependencies
+node_modules
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Next.js build output
+.next
+out
+
+# Environment files — never bake secrets into the image
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+logs/
+
+# Uploaded files — these should live in S3 / external storage
+uploads/
+
+# Development tools & editor configs
+.eslintcache
+.DS_Store
+Thumbs.db
+.vscode
+.idea
+
+# Test artifacts
+coverage
+__tests__
+*.test.ts
+*.spec.ts
+
+# Prisma migrations (schema is copied; migrations run at deploy time)
+prisma/migrations
+
+# TypeScript source maps (not needed in production image)
+**/*.map
+
+# README and docs (optional — remove if you want them in the image)
+README.md
+CHANGELOG.md
+docs/

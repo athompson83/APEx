@@ -1,0 +1,516 @@
+// =============================================================================
+// APEx Hub — Prisma Schema
+// PostgreSQL with pgvector extension for AI embeddings
+// =============================================================================
+// To enable pgvector, run in PostgreSQL:
+//   CREATE EXTENSION IF NOT EXISTS vector;
+// =============================================================================
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  directUrl  = env("DIRECT_URL")
+  extensions = [vector]
+}
+
+// =============================================================================
+// Enums
+// =============================================================================
+
+enum UserRole {
+  OWNER
+  ADMIN
+  VIEWER
+}
+
+enum OrgMemberRole {
+  OWNER
+  ADMIN
+  MEMBER
+  VIEWER
+}
+
+enum AgentType {
+  CHIEF_OF_STAFF
+  OPERATIONS_MANAGER
+  SALES_MANAGER
+  CUSTOMER_SUCCESS
+  ACCOUNTING
+  LEGAL_OPS
+  PRODUCT_MANAGER
+}
+
+enum ConversationStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+enum TaskStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+  AWAITING_APPROVAL
+}
+
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum KnowledgeBaseType {
+  GENERAL
+  AGENT_SPECIFIC
+  PROJECT
+}
+
+enum DocumentType {
+  PDF
+  DOCX
+  TXT
+  MARKDOWN
+  CSV
+  JSON
+  SPREADSHEET
+  SLIDE_DECK
+  URL
+  API_RESPONSE
+}
+
+enum DocumentStatus {
+  PENDING
+  PROCESSING
+  READY
+  FAILED
+}
+
+enum MemoryType {
+  FACT
+  PREFERENCE
+  CONTEXT
+  DECISION
+  RELATIONSHIP
+}
+
+enum WorkflowStatus {
+  ACTIVE
+  PAUSED
+  DRAFT
+}
+
+enum WorkflowRunStatus {
+  RUNNING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+// =============================================================================
+// NextAuth Models
+// =============================================================================
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String  @map("user_id")
+  type              String
+  provider          String
+  providerAccountId String  @map("provider_account_id")
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique @map("session_token")
+  userId       String   @map("user_id")
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("sessions")
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
+
+// =============================================================================
+// User
+// =============================================================================
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String?   @unique
+  emailVerified DateTime? @map("email_verified")
+  image         String?
+  role          UserRole  @default(VIEWER)
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  accounts      Account[]
+  sessions      Session[]
+  organizations OrganizationMember[]
+  tasks         AgentTask[]
+  conversations AgentConversation[]
+  documents     Document[]
+  auditLogs     AuditLog[]
+
+  @@index([email])
+  @@index([role])
+  @@map("users")
+}
+
+// =============================================================================
+// Organization
+// =============================================================================
+
+model Organization {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  plan      String   @default("free")
+  settings  Json     @default("{}")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  members        OrganizationMember[]
+  knowledgeBases KnowledgeBase[]
+  agents         Agent[]
+  workflows      Workflow[]
+  documents      Document[]
+  memories       Memory[]
+  integrations   Integration[]
+  auditLogs      AuditLog[]
+  tasks          AgentTask[]
+  conversations  AgentConversation[]
+  chunks         DocumentChunk[]
+  workflowRuns   WorkflowRun[]
+
+  @@index([slug])
+  @@map("organizations")
+}
+
+model OrganizationMember {
+  id             String        @id @default(cuid())
+  userId         String        @map("user_id")
+  organizationId String        @map("organization_id")
+  role           OrgMemberRole @default(MEMBER)
+  createdAt      DateTime      @default(now()) @map("created_at")
+
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, organizationId])
+  @@index([userId])
+  @@index([organizationId])
+  @@map("organization_members")
+}
+
+// =============================================================================
+// Agents
+// =============================================================================
+
+model Agent {
+  id             String    @id @default(cuid())
+  organizationId String    @map("organization_id")
+  name           String
+  type           AgentType
+  description    String?   @db.Text
+  systemPrompt   String    @db.Text @map("system_prompt")
+  settings       Json      @default("{}")
+  isActive       Boolean   @default(true) @map("is_active")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  organization  Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  conversations AgentConversation[]
+  tasks         AgentTask[]
+
+  @@index([organizationId])
+  @@index([type])
+  @@index([isActive])
+  @@map("agents")
+}
+
+model AgentConversation {
+  id             String             @id @default(cuid())
+  agentId        String             @map("agent_id")
+  organizationId String             @map("organization_id")
+  userId         String             @map("user_id")
+  title          String             @default("New Conversation")
+  messages       Json[]
+  status         ConversationStatus @default(ACTIVE)
+  createdAt      DateTime           @default(now()) @map("created_at")
+  updatedAt      DateTime           @updatedAt @map("updated_at")
+
+  agent        Agent        @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([agentId])
+  @@index([organizationId])
+  @@index([userId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("agent_conversations")
+}
+
+model AgentTask {
+  id             String       @id @default(cuid())
+  agentId        String       @map("agent_id")
+  organizationId String       @map("organization_id")
+  userId         String?      @map("user_id")
+  title          String
+  description    String?      @db.Text
+  status         TaskStatus   @default(PENDING)
+  priority       TaskPriority @default(MEDIUM)
+  result         Json?
+  errorMessage   String?      @db.Text @map("error_message")
+  scheduledAt    DateTime?    @map("scheduled_at")
+  startedAt      DateTime?    @map("started_at")
+  completedAt    DateTime?    @map("completed_at")
+  createdAt      DateTime     @default(now()) @map("created_at")
+  updatedAt      DateTime     @updatedAt @map("updated_at")
+
+  agent        Agent        @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([agentId])
+  @@index([organizationId])
+  @@index([userId])
+  @@index([status])
+  @@index([priority])
+  @@index([scheduledAt])
+  @@index([createdAt])
+  @@map("agent_tasks")
+}
+
+// =============================================================================
+// Knowledge Base & Documents
+// =============================================================================
+
+model KnowledgeBase {
+  id             String            @id @default(cuid())
+  organizationId String            @map("organization_id")
+  name           String
+  description    String?           @db.Text
+  type           KnowledgeBaseType @default(GENERAL)
+  agentType      AgentType?        @map("agent_type")
+  settings       Json              @default("{}")
+  createdAt      DateTime          @default(now()) @map("created_at")
+  updatedAt      DateTime          @updatedAt @map("updated_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  documents    Document[]
+
+  @@index([organizationId])
+  @@index([type])
+  @@index([agentType])
+  @@map("knowledge_bases")
+}
+
+model Document {
+  id              String         @id @default(cuid())
+  organizationId  String         @map("organization_id")
+  knowledgeBaseId String?        @map("knowledge_base_id")
+  userId          String         @map("user_id")
+  name            String
+  type            DocumentType
+  mimeType        String?        @map("mime_type")
+  size            Int?
+  storageKey      String         @map("storage_key")
+  content         String?        @db.Text
+  summary         String?        @db.Text
+  status          DocumentStatus @default(PENDING)
+  metadata        Json           @default("{}")
+  tags            String[]       @default([])
+  chunkCount      Int            @default(0) @map("chunk_count")
+  createdAt       DateTime       @default(now()) @map("created_at")
+  updatedAt       DateTime       @updatedAt @map("updated_at")
+
+  organization  Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  knowledgeBase KnowledgeBase? @relation(fields: [knowledgeBaseId], references: [id], onDelete: SetNull)
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  chunks        DocumentChunk[]
+
+  @@index([organizationId])
+  @@index([knowledgeBaseId])
+  @@index([userId])
+  @@index([status])
+  @@index([type])
+  @@index([createdAt])
+  @@map("documents")
+}
+
+model DocumentChunk {
+  id             String                        @id @default(cuid())
+  documentId     String                        @map("document_id")
+  organizationId String                        @map("organization_id")
+  content        String                        @db.Text
+  embedding      Unsupported("vector(1536)")?
+  metadata       Json                          @default("{}")
+  chunkIndex     Int                           @map("chunk_index")
+  tokenCount     Int                           @map("token_count")
+  createdAt      DateTime                      @default(now()) @map("created_at")
+
+  document     Document     @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([documentId])
+  @@index([organizationId])
+  @@index([chunkIndex])
+  @@map("document_chunks")
+}
+
+// =============================================================================
+// Memory
+// =============================================================================
+
+model Memory {
+  id                   String     @id @default(cuid())
+  organizationId       String     @map("organization_id")
+  agentType            AgentType? @map("agent_type")
+  content              String     @db.Text
+  summary              String?    @db.Text
+  type                 MemoryType
+  confidence           Decimal    @default(1.0) @db.Decimal(3, 2)
+  tags                 String[]   @default([])
+  expiresAt            DateTime?  @map("expires_at")
+  approved             Boolean    @default(true)
+  sourceDocumentId     String?    @map("source_document_id")
+  sourceConversationId String?    @map("source_conversation_id")
+  createdAt            DateTime   @default(now()) @map("created_at")
+  updatedAt            DateTime   @updatedAt @map("updated_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([agentType])
+  @@index([type])
+  @@index([approved])
+  @@index([expiresAt])
+  @@map("memories")
+}
+
+// =============================================================================
+// Workflows
+// =============================================================================
+
+model Workflow {
+  id             String         @id @default(cuid())
+  organizationId String         @map("organization_id")
+  name           String
+  description    String?        @db.Text
+  trigger        Json
+  steps          Json[]
+  status         WorkflowStatus @default(DRAFT)
+  lastRunAt      DateTime?      @map("last_run_at")
+  nextRunAt      DateTime?      @map("next_run_at")
+  createdAt      DateTime       @default(now()) @map("created_at")
+  updatedAt      DateTime       @updatedAt @map("updated_at")
+
+  organization Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  runs         WorkflowRun[]
+
+  @@index([organizationId])
+  @@index([status])
+  @@index([nextRunAt])
+  @@map("workflows")
+}
+
+model WorkflowRun {
+  id             String            @id @default(cuid())
+  workflowId     String            @map("workflow_id")
+  organizationId String            @map("organization_id")
+  status         WorkflowRunStatus
+  startedAt      DateTime          @map("started_at")
+  completedAt    DateTime?         @map("completed_at")
+  output         Json?
+  errorMessage   String?           @db.Text @map("error_message")
+  steps          Json[]
+
+  workflow     Workflow     @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([workflowId])
+  @@index([organizationId])
+  @@index([status])
+  @@index([startedAt])
+  @@map("workflow_runs")
+}
+
+// =============================================================================
+// Integrations
+// =============================================================================
+
+model Integration {
+  id             String   @id @default(cuid())
+  organizationId String   @map("organization_id")
+  type           String
+  name           String
+  credentials    Json     @default("{}")
+  settings       Json     @default("{}")
+  isActive       Boolean  @default(true) @map("is_active")
+  lastSyncAt     DateTime? @map("last_sync_at")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([type])
+  @@index([isActive])
+  @@map("integrations")
+}
+
+// =============================================================================
+// Audit Log
+// =============================================================================
+
+model AuditLog {
+  id             String   @id @default(cuid())
+  organizationId String   @map("organization_id")
+  userId         String?  @map("user_id")
+  action         String
+  resource       String
+  resourceId     String?  @map("resource_id")
+  details        Json     @default("{}")
+  ipAddress      String?  @map("ip_address")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([userId])
+  @@index([action])
+  @@index([resource])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
