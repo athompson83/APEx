@@ -23,19 +23,11 @@ import NextAuth, {
   type DefaultSession,
   type Session,
 } from 'next-auth';
-import { PrismaAdapter }     from '@auth/prisma-adapter';
-import CredentialsProvider   from 'next-auth/providers/credentials';
-import { getServerSession }  from 'next-auth/next';
-import bcrypt                from 'bcryptjs';
-import { PrismaClient }      from '@prisma/client';
-
-// ─── Prisma singleton ─────────────────────────────────────────────────────────
-
-let _prisma: PrismaClient | null = null;
-function getPrisma(): PrismaClient {
-  if (!_prisma) _prisma = new PrismaClient();
-  return _prisma;
-}
+import { PrismaAdapter }    from '@auth/prisma-adapter';
+import CredentialsProvider  from 'next-auth/providers/credentials';
+import { getServerSession } from 'next-auth/next';
+import bcrypt               from 'bcryptjs';
+import { db }               from '@/lib/db';
 
 // ─── Module augmentation ──────────────────────────────────────────────────────
 // Extend built-in NextAuth types so TypeScript knows about our extra fields.
@@ -67,7 +59,7 @@ declare module 'next-auth/jwt' {
 
 export const authOptions: NextAuthOptions = {
   // @ts-expect-error — @auth/prisma-adapter type slightly mismatches next-auth v4
-  adapter: PrismaAdapter(getPrisma()),
+  adapter: PrismaAdapter(db),
 
   session: {
     strategy: 'jwt',
@@ -93,10 +85,8 @@ export const authOptions: NextAuthOptions = {
           throw new Error('Email and password are required.');
         }
 
-        const prisma = getPrisma();
-
         // Case-insensitive email lookup.
-        const user = await prisma.user.findFirst({
+        const user = await db.user.findFirst({
           where: { email: { equals: credentials.email, mode: 'insensitive' } },
           include: {
             organizations: {

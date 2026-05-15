@@ -10,9 +10,9 @@
 
 import { PrismaClient, MemoryType, AgentType, Prisma } from '@prisma/client';
 import type { AgentMessage } from '@/lib/agents/types';
-import { completeWithClaude } from '@/lib/ai/anthropic';
-import { FAST_MODEL } from '@/lib/ai/anthropic';
+import { completeWithClaude, FAST_MODEL } from '@/lib/ai/anthropic';
 import { getVectorStore } from '@/lib/memory/vector-store';
+import { db } from '@/lib/db';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -51,14 +51,6 @@ export interface Memory {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-let _prisma: PrismaClient | null = null;
-
-function getPrisma(): PrismaClient {
-  if (_prisma) return _prisma;
-  _prisma = new PrismaClient();
-  return _prisma;
-}
-
 function prismaToMemory(
   row: Awaited<ReturnType<PrismaClient['memory']['findFirst']>>
 ): Memory {
@@ -87,7 +79,7 @@ export class MemoryManager {
   private prisma: PrismaClient;
 
   constructor(prisma?: PrismaClient) {
-    this.prisma = prisma ?? getPrisma();
+    this.prisma = prisma ?? db;
   }
 
   // ─── addMemory ────────────────────────────────────────────────────────────
@@ -436,6 +428,6 @@ const VALID_MEMORY_TYPES: MemoryType[] = [
 let _memoryManager: MemoryManager | null = null;
 
 export function getMemoryManager(): MemoryManager {
-  if (!_memoryManager) _memoryManager = new MemoryManager();
+  if (!_memoryManager) _memoryManager = new MemoryManager(db);
   return _memoryManager;
 }

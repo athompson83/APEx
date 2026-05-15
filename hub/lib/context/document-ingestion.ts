@@ -23,6 +23,7 @@ import { PrismaClient, DocumentStatus, DocumentType } from '@prisma/client';
 import { getVectorStore, DocumentChunkInput } from '@/lib/memory/vector-store';
 import { splitIntoChunks, estimateTokens, extractMetadata } from '@/lib/context/chunker';
 import { completeWithClaude, FAST_MODEL } from '@/lib/ai/anthropic';
+import { db } from '@/lib/db';
 
 // ─── ID generation ────────────────────────────────────────────────────────────
 // Uses the built-in crypto.randomUUID() available in Node 14.17+ and all
@@ -78,14 +79,6 @@ function mimeToDocumentType(mimeType: string): DocumentType {
   return DocumentType.TXT;
 }
 
-// ─── Prisma singleton ─────────────────────────────────────────────────────────
-
-let _prisma: PrismaClient | null = null;
-function getPrisma(): PrismaClient {
-  if (!_prisma) _prisma = new PrismaClient();
-  return _prisma;
-}
-
 // ─── DocumentIngestion ────────────────────────────────────────────────────────
 
 export class DocumentIngestion {
@@ -93,7 +86,7 @@ export class DocumentIngestion {
   private vectorStore = getVectorStore();
 
   constructor(prisma?: PrismaClient) {
-    this.prisma = prisma ?? getPrisma();
+    this.prisma = prisma ?? db;
   }
 
   // ─── ingestDocument ────────────────────────────────────────────────────────
